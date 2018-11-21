@@ -60,6 +60,7 @@ updater factory                    Restores factory version and wipes all user d
 updater userdata                   Wipes all user data
 updater testmode                   Enables or disables Test mode, allowing to receive beta builds
 updater cleanupdate                Updates to latest version and cleans user data, allowing a start like a newly flashed image
+updater restorevolumio             Delete all manually edited files from /volumio folder, restoring a pristine volumio core system
 "
 
 }
@@ -80,7 +81,7 @@ pull() {
 cd /
 echo "Stopping Volumio"
 sudo systemctl stop volumio.service
-sudo /bin/sh /volumio/app/plugins/system_controller/volumio_command_line_client/commands/pull.sh
+sudo /bin/sh /volumio/app/plugins/system_controller/volumio_command_line_client/commands/pull.sh $@
 
 echo "Pull completed, restarting Volumio"
 sudo systemctl start volumio.service

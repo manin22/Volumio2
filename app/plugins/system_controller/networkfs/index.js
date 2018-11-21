@@ -200,11 +200,16 @@ ControllerNetworkfs.prototype.mountShare = function (data) {
 		pointer = '//' + config.get('NasMounts.' + shareid + '.ip') + '/' + path;
 		//Password-protected mount
 		if (config.get(key + '.user') !== 'undefined' && config.get(key + '.user') !== '') {
-			credentials = 'username=' + config.get(key + '.user') + ',' + 'password=' + config.get(key + '.password') + ",";
+			var u = config.get(key + '.user');
+			var p = config.get(key + '.password');
+			u = self.properQuote(u);
+			p = self.properQuote(p);
+			credentials = 'username=' + u + ',' + 'password=' + p + ',';
 		} else {
 			credentials = 'guest,';
 		}
 		if (options) {
+			options = self.properQuote(options);
 			fsopts = credentials + "ro,dir_mode=0777,file_mode=0666,iocharset=utf8,noauto,soft,"+options;
 		} else {
 			fsopts = credentials + "ro,dir_mode=0777,file_mode=0666,iocharset=utf8,noauto,soft";
@@ -213,6 +218,7 @@ ControllerNetworkfs.prototype.mountShare = function (data) {
 	} else { // nfs
 		pointer = config.get('NasMounts.' + shareid + '.ip') + ':' + path;
 		if (options) {
+			options = self.properQuote(options);
 			fsopts ="ro,soft,noauto,"+options;
 		} else {
 			fsopts ="ro,soft,noauto";
@@ -937,4 +943,82 @@ ControllerNetworkfs.prototype.writeSMBConf = function () {
                 });
             }
         });
+
+    exec('/usr/bin/sudo /bin/chmod 777 /data/INTERNAL', {uid:1000,gid:1000},function (error, stdout, stderr) {
+        if (error != null) {
+            self.logger.info('Error setting /data/internal perms: ' + error);
+        } else {
+			self.logger.info('Internal perms successfully set');
+        }
+    });
 };
+
+ControllerNetworkfs.prototype.onVolumioReboot = function () {
+    var self = this;
+
+    return self.umountAllShares();
+};
+
+ControllerNetworkfs.prototype.onVolumioShutdown = function () {
+	var self = this;
+
+    return self.umountAllShares();
+};
+
+ControllerNetworkfs.prototype.umountAllShares = function () {
+	var self = this;
+
+    var defer = libQ.defer();
+	var shares = config.getKeys('NasMounts');
+    var nShares = shares.length;
+
+    if (nShares > 0) {
+		for (var i in shares) {
+			self.umountShare({'id':shares[i]});
+		}
+    }
+    defer.resolve('');
+
+	return defer.promise;
+};
+
+ControllerNetworkfs.prototype.umountShare = function (data) {
+    var self = this;
+
+    var defer = libQ.defer();
+    var key = "NasMounts." + data['id'];
+
+    if (config.has(key)) {
+        var mountidraw = config.get(key + '.name');
+        var mountid = mountidraw.replace(/[\s\n\\]/g, "_");
+        var mountpoint = '/mnt/NAS/' + mountid;
+        try {
+            execSync("/usr/bin/sudo /bin/umount -f " + mountpoint, { uid: 1000, gid: 1000, encoding: 'utf8', timeout: 10000 });
+		} catch(e) {
+			self.logger.error('Cannot umount share ' + mountid + ' : ' + e);
+		}
+    }
+};
+
+ControllerNetworkfs.prototype.properQuote = function (str) {
+    // returns str as a single-quoted string, safe for exposure to a shell.
+    var output = '';
+
+    var quotedquote = "'"  // turn on single quoting
+        + '"'  // turn on double quoting
+        + "'"  // so we can quote this single quote
+        + '"'  // turn off double quoting
+        + "'"; // turn off single quoting
+
+    var pieces = str.split("'");
+    var n = pieces.length;
+
+    for (var i=0; i<n; i++) {
+        output = output + pieces[i];
+        if (i < (n-1)) output = output + quotedquote;
+    }
+
+    output = "'" + output + "'";
+
+    return output;
+}

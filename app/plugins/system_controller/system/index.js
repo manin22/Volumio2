@@ -8,6 +8,7 @@ var exec = require('child_process').exec;
 var spawn = require('child_process').spawn;
 var crypto = require('crypto');
 var calltrials = 0;
+var additionalSVInfo;
 
 // Define the ControllerSystem class
 module.exports = ControllerSystem;
@@ -227,25 +228,29 @@ ControllerSystem.prototype.saveGeneralSettings = function (data) {
 
     var defer = libQ.defer();
 
-    var player_name = data['player_name'];
-    var hostname = data['player_name'].split(" ").join("-");
     if (data['startup_sound'] != undefined) {
         self.config.set('startupSound', data['startup_sound']);
+    }
+
+    var oldPlayerName = self.config.get('playerName');
+    var player_name = data['player_name'];
+    if (player_name !== oldPlayerName) {
+        var hostname = data['player_name'].split(" ").join("-");
+        self.config.set('playerName', player_name);
+        self.commandRouter.pushToastMessage('success', self.commandRouter.getI18nString('SYSTEM.SYSTEM_CONFIGURATION_UPDATE'), self.commandRouter.getI18nString('SYSTEM.SYSTEM_CONFIGURATION_UPDATE_SUCCESS'));
+        self.setHostname(player_name);
+        self.commandRouter.sharedVars.set('system.name', player_name);
+        defer.resolve({});
+
+        for (var i in self.callbacks) {
+            var callback = self.callbacks[i];
+
+            callback.call(callback, player_name);
+        }
+	} else {
+        defer.resolve({});
 	}
 
-    self.config.set('playerName', player_name);
-
-
-	self.commandRouter.pushToastMessage('success', self.commandRouter.getI18nString('SYSTEM.SYSTEM_CONFIGURATION_UPDATE'), self.commandRouter.getI18nString('SYSTEM.SYSTEM_CONFIGURATION_UPDATE_SUCCESS'));
-	self.setHostname(player_name);
-	self.commandRouter.sharedVars.set('system.name', player_name);
-	defer.resolve({});
-
-    for (var i in self.callbacks) {
-        var callback = self.callbacks[i];
-
-        callback.call(callback, player_name);
-    }
     return defer.promise;
 };
 
@@ -398,10 +403,13 @@ ControllerSystem.prototype.getSystemVersion = function () {
 			str = file[l].split('=');
 			releaseinfo.hardware = str[1].replace(/\"/gi, "");
 		}
-
 	}
-	defer.resolve(releaseinfo);
 
+	if (additionalSVInfo) {
+        releaseinfo.additionalSVInfo = additionalSVInfo;
+	}
+
+	defer.resolve(releaseinfo);
 
 	return defer.promise;
 };
@@ -941,4 +949,37 @@ ControllerSystem.prototype.versionChangeDetect = function () {
 			}
         }
     });
+};
+
+ControllerSystem.prototype.getMainDiskUsage = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var unity = ' MB';
+    var mainDiskUsageObj = {'size':'','used':'','free':'','usedPercentage':'','freePercentage':''};
+
+    exec("/bin/df -h -m | grep overlay", {uid: 1000, gid: 1000}, function (error, stdout, stderr) {
+        if (error !== null) {
+            defer.reject({'error':error})
+        } else {
+        	try {
+                var mainDiskArray = stdout.toString().split(' ').filter(item => item.trim() !== '');
+                mainDiskUsageObj.size = mainDiskArray[1] + unity;
+                mainDiskUsageObj.used = mainDiskArray[2] + unity;
+                mainDiskUsageObj.free = mainDiskArray[3] + unity;
+                mainDiskUsageObj.usedPercentage = parseInt(mainDiskArray[4].replace('%', ''));
+                mainDiskUsageObj.freePercentage = 100 - mainDiskUsageObj.usedPercentage;
+                defer.resolve(mainDiskUsageObj);
+			} catch(e) {
+        		self.logger.error('Error in parsing main disk data: ' + e);
+                defer.reject({'error':error})
+			}
+        }
+    });
+    return defer.promise
+};
+
+ControllerSystem.prototype.setAdditionalSVInfo = function (data) {
+    var self = this;
+	self.logger.info('Setting Additional System Software info: ' + data);
+    additionalSVInfo = data;
 };
